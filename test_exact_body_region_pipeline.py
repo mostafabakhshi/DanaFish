@@ -613,17 +613,26 @@ class ExactBodyRegionAnalyzer:
         print(f"  📊 Excel results saved: {output_path}")
         return output_path
     
-    def analyze_exact_body_region(self, image, exact_body_bbox, labels, boxes, confidences):
+    def analyze_exact_body_region(self, image, exact_body_bbox, labels, boxes, confidences,
+                                  protected_boxes=None, cord_override=None):
         """
         Analyze the exact body region for spinal cord and neurons.
-        
+
         Args:
             image: Input image
-            exact_body_bbox: Exact body bbox coordinates [x1,y1,x2,y2] 
+            exact_body_bbox: Exact body bbox coordinates [x1,y1,x2,y2]
             labels: Detection labels
             boxes: Detection boxes
             confidences: Detection confidences
-            
+            protected_boxes: Optional list of boxes that must never be discarded by the
+                "on/above the spinal cord line" filter. Used by the semi-automatic editor
+                (manual.py) so neurons placed by hand are always kept, even if they sit on
+                the cord line. Defaults to None, which preserves the fully automatic
+                behaviour used by main.py exactly.
+            cord_override: Optional (xs, ys) polyline replacing the automatically fitted
+                spinal cord, so an operator-corrected cord drives neuron filtering,
+                distance-to-curve and the reported length. Also defaults to None.
+
         Returns:
             annotated_image, analysis_results
         """
@@ -678,16 +687,35 @@ class ExactBodyRegionAnalyzer:
         distances_to_curve = []
         segment_data = []
         
-        if len(brightest_points) >= 3:
-            # Fit curve to points
-            x_smooth, y_smooth, spinal_length = self.fit_curve_to_points(brightest_points)
-            
+        # An operator-edited cord (from manual.py) always wins over the automatic
+        # brightness fit; otherwise behave exactly as before.
+        has_override = (cord_override is not None
+                        and len(np.asarray(cord_override[0], dtype=float).ravel()) > 1)
+
+        if has_override or len(brightest_points) >= 3:
+            if has_override:
+                x_smooth = np.asarray(cord_override[0], dtype=float).ravel()
+                y_smooth = np.asarray(cord_override[1], dtype=float).ravel()
+                spinal_length = float(np.sum(np.hypot(np.diff(x_smooth), np.diff(y_smooth))))
+                print(f"  ✏️ Using operator-edited spinal cord: {len(x_smooth)} points, "
+                      f"{spinal_length:.1f}px")
+            else:
+                # Fit curve to points
+                x_smooth, y_smooth, spinal_length = self.fit_curve_to_points(brightest_points)
+
             if len(x_smooth) > 1:
                 # --- Filter out neurons ON or ABOVE the spinal cord line ---
                 # In image coordinates y increases downward, so "above the cord"
                 # means n_cy < cord_y.  We keep only neurons that are strictly
                 # BELOW the cord (n_cy > cord_y + threshold).
                 ON_LINE_THRESHOLD = 8  # pixels clearance below the cord
+
+                def _box_key(b):
+                    """Rounded tuple key so a box survives list/array round-trips."""
+                    return tuple(np.round(np.asarray(b, dtype=float), 2).tolist())
+
+                protected_keys = {_box_key(b) for b in (protected_boxes or [])}
+
                 filtered_neurons = []
                 filtered_confidences = []
                 for box, conf in zip(neurons_in_exact_region, neuron_confidences):
@@ -695,8 +723,9 @@ class ExactBodyRegionAnalyzer:
                     n_cx = (n_x1 + n_x2) / 2
                     n_cy = (n_y1 + n_y2) / 2
                     cord_y_at_cx = float(np.interp(n_cx, x_smooth, y_smooth))
-                    # Keep only neurons whose centre is clearly below the cord line
-                    if n_cy > cord_y_at_cx + ON_LINE_THRESHOLD:
+                    # Keep neurons the user placed by hand unconditionally, plus any
+                    # neuron whose centre is clearly below the cord line.
+                    if _box_key(box) in protected_keys or n_cy > cord_y_at_cx + ON_LINE_THRESHOLD:
                         filtered_neurons.append(box)
                         filtered_confidences.append(conf)
 

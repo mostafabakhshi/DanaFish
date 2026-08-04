@@ -49,10 +49,13 @@ pip install -r requirements.txt
 current directory is the project root:
 
 ```powershell
-cd D:\Project2\zebraFish\v10Y0726
+cd D:\Project2\zebraFish\v11
 ```
 
 Running from anywhere else fails at model load.
+
+> This is **v11**. The fully automatic v10 lives in `D:\Project2\zebraFish\v10Y0726` and has no
+> `manual.py` — running `python manual.py` there gives `No such file or directory`.
 
 ### Step 1 — Select the environment
 
@@ -97,6 +100,124 @@ Or call the entry point directly, which is cleaner for scripted/batch runs:
 ```powershell
 python -c "from main import process_images; process_images('PLXNA1-Jesh-JPG-Final', 'results_plxna1')"
 ```
+
+---
+
+## Semi-Automatic Mode (v11)
+
+`manual.py` runs the same models and the same analysis as `main.py`, but lets the operator
+correct the model at every stage. Use it when the automatic pipeline gets an image wrong.
+
+```powershell
+python manual.py
+```
+
+`main.py` is unchanged — the fully automatic path still behaves exactly as before.
+
+### Workflow
+
+**Open an image and the whole pipeline runs immediately** — orientation correction, region
+detection, neuron detection and spinal-cord fitting. You are presented with a finished result and
+only intervene where it is wrong.
+
+The panel offers two modes, **Edit** (the default, since correcting the result is the job) and
+**View** for panning around without changing anything. Edit fans out into what you are correcting,
+and lands on **Neurons** after each image loads:
+
+| Edit target | What you do |
+|---|---|
+| **Head** `H` / **Tail** `T` | Drag to place the landmark when the detector was wrong or found nothing; `Delete` erases it. Then `Ctrl+R` re-applies the orientation from your corrected landmarks. |
+| **Region of interest** `R` | Drag to redraw the region. Drag a corner handle to adjust, `Delete` to clear. `Ctrl+D` re-detects inside it. |
+| **Spinal cord** `S` | Drag a control point to **bend** the curve · click empty space to **insert** one · right-click or `Delete` to **remove** one · `Ctrl+Shift+R` refits automatically. |
+| **Neurons** `N` | Drag empty space to **add** · right-click to **delete** · drag a box to **move** · drag a corner to **resize**. The list has a tick box per neuron with **Remove ticked**, plus **Clear all neurons** to start counting by hand. |
+
+Then `Ctrl+S` exports the annotated image, Excel metrics, an edit log, and appends to
+`summary_manual.xlsx`.
+
+> **`body` is not shown.** The detector's body box is still used internally — it sets the
+> orientation and seeds the region of interest — but it is neither drawn nor offered as an edit
+> target, because it nearly coincides with the ROI and having two near-identical rectangles on
+> screen is just noise.
+
+### Editing the spinal cord
+
+The cord is a curve, so it is edited as a **smooth curve through a small number of control
+points** rather than drawn freehand — a hand-drawn line is jittery and hard to place precisely,
+whereas a spline through ~10 handles is both easier and closer to the real anatomy.
+
+When detection runs, the automatic fit is sampled into 10 draggable handles. Drag one to correct a
+region, click to insert a handle where you need finer control, right-click to remove one. Below
+four handles the curve degrades gracefully (quadratic, then linear) rather than failing.
+
+An edited cord is not cosmetic — it is passed back into the analysis, so it drives which neurons
+are kept, the distance-to-curve values, and the reported length. Verified on a test image: dragging
+the cord below the neurons drops the count from 12 to 0, and a deliberately wavy cord changes both
+the count (8) and the length (625 px vs 453 px).
+
+Re-running detection preserves your cord edits; `Ctrl+Shift+R` discards them and refits.
+
+### Units
+
+Lengths are shown in **pixels by default**. The side panel has an explicit Pixels / Micrometres
+choice; the µm option becomes selectable once a scale is set (`Ctrl+K`), so the interface never
+implies a physical measurement it cannot make.
+
+The choice affects the display only. If a calibration exists, exported results always carry the µm
+columns regardless of which unit is on screen — switching the view to pixels never strips
+measurements from your saved data.
+
+Keys: `V` view · `E` edit · `H` head · `T` tail · `R` region · `S` cord · `N` neurons ·
+`M` measure · `Ctrl+K` set scale · `Ctrl+Z` undo · `Ctrl+0` fit view ·
+`PgUp`/`PgDn` previous/next image · `F1` help. Mouse wheel zooms; middle-drag pans.
+
+Neurons are colour-coded by origin — **green** came from the model, **gold** was placed by hand —
+so it stays visible how much of a count is automated and how much is manual.
+
+### Measuring in micrometres
+
+Press `Ctrl+K` to calibrate. Either type in µm-per-pixel directly, or press `M`, drag along a
+distance you already know (a scale bar in the image, or a feature of known size), then reopen
+`Ctrl+K` and enter what that distance actually is — the dialog converts your measurement into a
+calibration. The value is written to `calibration.json` and reloaded in later sessions.
+
+Once calibrated:
+
+- a microscopy-style **scale bar** appears bottom-right, snapped to a round length,
+- the **ruler** ticks along the top and left edges switch from pixels to µm,
+- the **ROI label** and side panel report width × height in µm live as you drag,
+- the **spinal-cord length** is reported in µm,
+- the exported spreadsheet gains `Line_um`, `ROI_width_um`, `ROI_height_um`,
+  `Neurons_per_100um` and `um_per_px`,
+- the exported annotated image has the scale bar **burned in**, so figures are publication-ready.
+
+Uncalibrated, everything falls back to pixels and nothing else changes.
+
+> **Why calibration is stored per *original* pixel.** The pipeline fits every image onto an
+> 840 × 840 canvas by `scale_factor = min(840/w, 840/h)`, and that factor differs per image — a
+> 2056 × 685 micrograph is displayed at 0.409×. Storing µm-per-*displayed*-pixel would therefore be
+> wrong for every image of a different size. The calibration is a property of the objective and
+> camera, so it is held in original-image pixels and converted per image as
+> `µm_per_displayed_px = µm_per_original_px / scale_factor`. On a real 2056 × 685 image, ignoring
+> this would under-report lengths by **2.45×**.
+
+### Output
+
+Alongside the `annotated_*.jpg` and `metrics_*.xlsx` that the automatic pipeline produces,
+semi-automatic mode writes two extra files for provenance:
+
+- `edits_<stem>.json` — the ROI, every neuron with its origin, and every neuron deleted by hand.
+- `summary_manual.xlsx` — one row per image with `Neurons`, `From_model`, `Added_by_hand`,
+  `Deleted_by_hand`, `Line_px`, `ROI`, `Confidence`, and which landmarks were edited.
+
+Re-exporting an image replaces its existing row rather than duplicating it.
+
+### One deliberate difference from the automatic pipeline
+
+`ExactBodyRegionAnalyzer.analyze_exact_body_region` discards neurons whose centre sits on or above
+the fitted spinal-cord line. That is correct for automatic runs but would silently delete a neuron
+the operator had just placed by hand. The method therefore takes an optional `protected_boxes`
+argument, which `manual.py` populates with the hand-placed neurons so they always survive.
+It defaults to `None`, leaving `main.py`'s behaviour bit-for-bit identical.
 
 ---
 
