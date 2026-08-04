@@ -7,9 +7,9 @@
 # unpublished data out.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Local µm-per-pixel calibration written by the semi-automatic editor — specific
-# to the microscope and objective in use, so not shared. The scale actually used
-# for a result is recorded in that result's edits_*.json and summary_manual.xlsx.
+# Local µm-per-pixel calibration written by manual.py — specific to the
+# microscope and objective in use, so not shared. The scale actually used for a
+# result is recorded in that result's edits_*.json and summary_manual.xlsx.
 calibration.json
 
 # Python
