@@ -49,13 +49,10 @@ pip install -r requirements.txt
 current directory is the project root:
 
 ```powershell
-cd D:\Project2\zebraFish\v11
+cd D:\Project2\zebraFish\v10Y0726
 ```
 
 Running from anywhere else fails at model load.
-
-> This is **v11**. The fully automatic v10 lives in `D:\Project2\zebraFish\v10Y0726` and has no
-> `manual.py` — running `python manual.py` there gives `No such file or directory`.
 
 ### Step 1 — Select the environment
 
@@ -103,10 +100,14 @@ python -c "from main import process_images; process_images('PLXNA1-Jesh-JPG-Fina
 
 ---
 
-## Semi-Automatic Mode (v11)
+## Semi-Automatic Mode
 
-`manual.py` runs the same models and the same analysis as `main.py`, but lets the operator
-correct the model at every stage. Use it when the automatic pipeline gets an image wrong.
+The project provides two entry points that share the same models and the same analysis:
+
+- `main.py` — fully automatic, processes a folder unattended.
+- `manual.py` — semi-automatic, for correcting the model where it gets an image wrong.
+
+`manual.py` requires PyQt5 (included in `requirements.txt`); `main.py` does not.
 
 ```powershell
 python manual.py
