@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# This repository tracks SOURCE CODE ONLY.
+#
+# Research data, model weights, generated results, and the unpublished
+# manuscript are deliberately excluded. Anything committed here is permanently
+# recoverable from git history once the repository is made public, so keep
+# unpublished data out.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Local µm-per-pixel calibration written by the semi-automatic editor — specific
+# to the microscope and objective in use, so not shared. The scale actually used
+# for a result is recorded in that result's edits_*.json and summary_manual.xlsx.
+calibration.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ── Model weights (50 MB; distribute via GitHub Releases, not git) ───────────
+*.pt
+*.pth
+runs/
+
+# ── Training datasets (datasets/fish13_v8_neuron_only alone is 4.8 GB) ──────
+datasets/
+
+# ── Raw research images (unpublished) ───────────────────────────────────────
+Thabiso_MP_Fish-Images/
+PLXNA1-Jesh-JPG-Final/
+test-images-model/
+
+# ── Generated pipeline output ───────────────────────────────────────────────
+*-result/
+results/
+out/
+output*/
+trained_model_output/
+test_results/
+test_analysis_output/
+verification_results/
+annotation_demo_results/
+biological_analysis_*/
+
+# ── Manuscript (unpublished) ────────────────────────────────────────────────
+MANUSCRIPT_DRAFT.md
+manuscript_figures/
+
+# Generated spreadsheets / slides / archives
+*.xlsx
+*.pptx
+*.zip
+BIOLOGICAL_*.png
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Editors / tooling
+.vscode/
+.qodo/
+
+# OS
+.DS_Store
+Thumbs.db
