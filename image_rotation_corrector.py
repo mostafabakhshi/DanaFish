@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 import os
 import logging
+import tempfile
 from rotation_model import ZebraFishRotationModel
+from preprocessing import preprocess
+from config import LANDMARK_MODEL_PATH
 from pathlib import Path
 
 # Configure logging
@@ -17,9 +20,9 @@ class ImageRotationCorrector:
     Target: head (h) on left of body (b), tail (t) below body (b)
     """
     
-    def __init__(self, rotation_model_path="runs/detect/rotation_model_v1/weights/best.pt", target_size=(840, 840)):
-        """Initialize the rotation corrector with trained landmark model."""
-        self.rotation_model = ZebraFishRotationModel(rotation_model_path)
+    def __init__(self, rotation_model_path=None, target_size=(840, 840)):
+        """Initialize the rotation corrector with the trained landmark model."""
+        self.rotation_model = ZebraFishRotationModel(rotation_model_path or LANDMARK_MODEL_PATH)
         self.target_size = target_size  # (width, height) for resizing
         logger.info(f"Image Rotation Corrector initialized with target size: {target_size}")
     
@@ -527,17 +530,36 @@ class ImageRotationCorrector:
         original_image = cv2.imread(image_path)
         if original_image is None:
             raise ValueError(f"Could not load image: {image_path}")
-        
+
         logger.info(f"Correcting orientation for: {os.path.basename(image_path)}")
-        
+
+        # Step 0: Remove the background pedestal before any inference, so that both
+        # the landmark model and the neuron model see the corrected pixels.
+        original_image, pedestal = preprocess(original_image)
+
+        # The landmark model reads from disk, so a preprocessed image has to reach it
+        # as a file. Written only when preprocessing actually changed something.
+        landmark_source = image_path
+        temp_preprocessed = None
+        if pedestal > 0:
+            fd, temp_preprocessed = tempfile.mkstemp(suffix=Path(image_path).suffix or ".jpg")
+            os.close(fd)
+            cv2.imwrite(temp_preprocessed, original_image)
+            landmark_source = temp_preprocessed
+            logger.info(f"Removed background pedestal: {pedestal:.1f}")
+
         # Step 1: Resize image to 840x840 with aspect ratio preservation
         resized_image, scale_factor, offset_x, offset_y = self.resize_image_with_aspect_ratio(
             original_image, self.target_size
         )
-        
+
         # Step 2: Get landmarks from the ORIGINAL image (before resize)
-        landmarks = self.rotation_model.get_orientation_landmarks(image_path)
-        
+        try:
+            landmarks = self.rotation_model.get_orientation_landmarks(landmark_source)
+        finally:
+            if temp_preprocessed:
+                os.unlink(temp_preprocessed)
+
         # Step 3: Transform landmarks to match the resized image
         if landmarks:
             resized_landmarks = self.transform_landmarks_for_resize(

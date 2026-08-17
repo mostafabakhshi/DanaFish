@@ -7,12 +7,46 @@ COCO_EXTRACT_PATH = "datasets/zebra_coco"
 YOLO_OUTPUT_DIR = "datasets/zebra_yolo"
 OUTPUT_ANNOTATED_PATH = "datasets/zebra_yolo/test/My_Prediction"
 OUTPUT_EXCEL_PATH = "results/results_{}.xlsx"
-NEURON_MODEL_PATH  = "runs/detect/runs/detect/neuron_v7_yolo26m_1280/weights/best.pt"  # YOLO26m neuron-only v7, mAP50=0.907
+NEURON_MODEL_PATH  = "runs/detect/runs/detect/neuron_v7_yolo26m_1280/weights/best.pt"  # YOLO26m neuron-only v7
 TRAINED_MODEL_PATH = NEURON_MODEL_PATH
+
+# ── Landmark detector (4-class: b, h, n, t) ──────────────────────────────────
+# YOLO26m, trained at imgsz 1280 on datasets/fish13_union_4class — the pooled
+# fish13.v4 and fish13.v8 annotation sets (700/99/65 images). Used for
+# orientation standardization and to seed the spinal-cord region.
+LANDMARK_MODEL_PATH = "runs/detect/runs/detect/landmark_v8_yolo26m_union/weights/best.pt"
+
+# Preprocessing configuration (pipeline Step 1, before any inference)
+PREPROCESS_CONFIG = {
+    "enabled": True,       # Subtract the per-image background pedestal.
+    "percentile": 1.0,     # Percentile of non-zero pixels taken as the black point.
+    "channel": 1,          # Green channel — carries the GFP signal.
+    "min_pedestal": 15.0,  # Below this the image has no pedestal worth removing and
+                           # is passed through untouched. Guards against acting on
+                           # images that do not exhibit the failure mode.
+}
+
+# Landmark detector configuration
+LANDMARK_CONFIG = {
+    "confidence": 0.1,        # Head/tail/neuron classes.
+    "body_confidence": 0.01,  # The body class scores lower on coiled and dim larvae,
+                              # so it carries its own, lower threshold. Head and tail
+                              # keep 0.1, so orientation is unaffected.
+    "overlap": 0.5,           # NMS IoU.
+    "imgsz": 960,             # Default single-scale inference size.
+    # The body/spine class is scale-sensitive on elongated and coiled larvae, so
+    # the body is searched over several inference sizes in this order, taking the
+    # first detection at or above body_search_accept and otherwise the most
+    # confident one found. Head and tail are read from the same pass, so the
+    # accepted scale determines all landmarks for that image.
+    "body_search_scales": (960, 416, 320),
+    "body_search_accept": 0.1,
+}
 
 # Model configuration
 MODEL_CONFIG = {
-    "confidence": 0.30,          # Neuron/cell detection confidence threshold (optimized for unbiased counting)
+    "confidence": 0.35,          # Selected on the validation split: within the flat-MAE region
+                                 # (0.30-0.38) it is the threshold with bias closest to zero.
     "overlap": 0.5,             # Adjusted for better balance
     "threshold": 30,
     "padding": 20,
