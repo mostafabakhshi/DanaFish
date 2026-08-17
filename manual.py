@@ -1232,9 +1232,9 @@ class MainWindow(QMainWindow):
         self.conf_spin = QDoubleSpinBox()
         self.conf_spin.setRange(0.01, 0.99)
         self.conf_spin.setSingleStep(0.05)
-        self.conf_spin.setValue(0.30)
+        self.conf_spin.setValue(0.35)
         self.conf_spin.setToolTip('Lower finds more neurons (and more false positives). '
-                                  'The automatic pipeline uses 0.30.')
+                                  'The automatic pipeline uses 0.35.')
         row.addWidget(self.conf_spin)
         g3.addLayout(row)
         self.keep_user_cb = QCheckBox('Keep my edits when re-detecting')

@@ -4,6 +4,8 @@ import numpy as np
 import logging
 import os
 
+from config import LANDMARK_CONFIG, LANDMARK_MODEL_PATH
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,9 +20,19 @@ class ZebraFishRotationModel:
         """Initialize the rotation model."""
         self.model_path = model_path
         self.model = None
-        self.confidence = 0.1  # Lowered to detect body in curved/difficult images
-        self.overlap = 0.5
-        
+        # Thresholds and inference size come from config so there is one source of
+        # truth. imgsz must match the resolution the weights were trained at.
+        self.confidence = LANDMARK_CONFIG["confidence"]
+        # Separate, lower threshold for the BODY class only. The body/spinal-cord
+        # class scores lower on coiled and dim larvae. Head/tail keep the higher
+        # threshold, so orientation is unaffected by this.
+        self.body_confidence = LANDMARK_CONFIG["body_confidence"]
+        self.overlap = LANDMARK_CONFIG["overlap"]
+        self.imgsz = LANDMARK_CONFIG["imgsz"]
+        self.body_search_scales = tuple(LANDMARK_CONFIG.get("body_search_scales")
+                                        or (LANDMARK_CONFIG["imgsz"],))
+        self.body_search_accept = LANDMARK_CONFIG.get("body_search_accept", 0.1)
+
         # Class mapping for the new dataset
         self.class_names = {
             0: 'b',  # body (spine)
@@ -41,19 +53,26 @@ class ZebraFishRotationModel:
         self.model_path = model_path
         logger.info("Rotation model loaded successfully")
     
-    def train_rotation_model(self, data_yaml_path, epochs=50):
-        """Train the rotation detection model."""
-        logger.info("Starting rotation model training...")
-        
-        # Initialize with YOLOv11 nano for faster training
-        self.model = YOLO('yolo11n.pt')
-        
-        # Training configuration optimized for rotation detection
+    def train_rotation_model(self, data_yaml_path, epochs=300, base="yolo26m.pt",
+                             imgsz=1280, batch=2,
+                             run_name="landmark_v8_yolo26m_union"):
+        """Train the landmark detection model.
+
+        The defaults reproduce the shipped weights: YOLO26m at imgsz 1280 on the
+        pooled 4-class dataset (datasets/fish13_union_4class/data.yaml). The full
+        argument set of the shipped run is also preserved in that run's own
+        args.yaml.
+        """
+        logger.info(f"Starting landmark model training from {base} at imgsz {imgsz}...")
+
+        self.model = YOLO(base)
+
+        # Training configuration optimized for landmark detection
         results = self.model.train(
             data=data_yaml_path,
             epochs=epochs,
-            imgsz=640,
-            batch=8,
+            imgsz=imgsz,
+            batch=batch,
             optimizer="AdamW",
             lr0=0.001,
             lrf=0.01,
@@ -82,41 +101,68 @@ class ZebraFishRotationModel:
             close_mosaic=10,
             cos_lr=True,
             patience=50,
-            save_period=10,
-            device='cpu',
-            workers=8,
-            project="runs/detect",
-            name="rotation_model_v1",
+            save_period=25,
+            device=0,
+            # Ultralytics resolves a relative project against its own runs_dir, which
+            # would nest the run a second level deep; give it an absolute path.
+            workers=4,
+            project=os.path.abspath(os.path.join("runs", "detect", "runs", "detect")),
+            name=run_name,
             exist_ok=True,
             pretrained=True,
             amp=True,
             fraction=1.0,
-            cache=True,
+            cache=False,
             label_smoothing=0.0,  # No label smoothing for precise landmark detection
             verbose=True,
             seed=42
         )
         
         # Update model path to the best trained model
-        self.model_path = f"runs/detect/rotation_model_v1/weights/best.pt"
-        logger.info(f"Rotation model training completed. Best model saved to: {self.model_path}")
+        self.model_path = f"runs/detect/runs/detect/{run_name}/weights/best.pt"
+        logger.info(f"Landmark model training completed. Best model saved to: {self.model_path}")
         
         return results
     
     def get_orientation_landmarks(self, image_path):
         """
         Detect head, tail, and body landmarks for orientation analysis.
-        
+
+        The body/spine class is scale-sensitive on elongated and coiled larvae, so
+        it is searched over the inference sizes in LANDMARK_CONFIG
+        ['body_search_scales']. The first scale returning a body at or above
+        ['body_search_accept'] is taken; if none reaches it, the most confident
+        body found across the scales is used. Head and tail come from the same
+        pass as the accepted body, so all landmarks stay mutually consistent.
+
         Returns:
             dict: Dictionary containing detected landmarks with their coordinates
         """
         if not self.model:
             raise ValueError("No rotation model loaded. Train or load a model first.")
-        
-        # Get predictions
+
+        scales = self.body_search_scales or (self.imgsz,)
+        best = None
+        last = None
+        for size in scales:
+            last = self._detect_at(image_path, size)
+            body = last.get('body')
+            if body:
+                if best is None or body['confidence'] > best['body']['confidence']:
+                    best = last
+                if body['confidence'] >= self.body_search_accept:
+                    break
+        return best if best is not None else last
+
+    def _detect_at(self, image_path, imgsz):
+        """Run one detection pass at a given inference size."""
+        # Predict down to the lowest of the per-class thresholds; each class is
+        # then filtered at its own threshold below.
+        floor_conf = min(self.confidence, self.body_confidence)
         with open(os.devnull, 'w') as f:
-            results = self.model.predict(image_path, conf=self.confidence, iou=self.overlap, verbose=False)
-        
+            results = self.model.predict(image_path, conf=floor_conf, iou=self.overlap,
+                                         imgsz=imgsz, verbose=False)
+
         landmarks = {
             'head': None,
             'tail': None,
@@ -148,17 +194,27 @@ class ZebraFishRotationModel:
                     'confidence': confidence
                 }
                 
-                # Assign to appropriate landmark category
+                # Assign to appropriate landmark category, applying the
+                # per-class threshold: body uses self.body_confidence, every
+                # other class keeps self.confidence.
                 if class_name == 'h':  # head
+                    if confidence < self.confidence:
+                        continue
                     if landmarks['head'] is None or confidence > landmarks['head']['confidence']:
                         landmarks['head'] = landmark_info
                 elif class_name == 't':  # tail
+                    if confidence < self.confidence:
+                        continue
                     if landmarks['tail'] is None or confidence > landmarks['tail']['confidence']:
                         landmarks['tail'] = landmark_info
                 elif class_name == 'b':  # body
+                    if confidence < self.body_confidence:
+                        continue
                     if landmarks['body'] is None or confidence > landmarks['body']['confidence']:
                         landmarks['body'] = landmark_info
                 elif class_name == 'n':  # neurons
+                    if confidence < self.confidence:
+                        continue
                     landmarks['neurons'].append(landmark_info)
         
         return landmarks
@@ -174,9 +230,9 @@ class ZebraFishRotationModel:
         return results
 
 if __name__ == "__main__":
-    # Test script for rotation model
+    # Retrain the landmark detector from scratch.
+    # On Windows the dataloader workers re-import this module, so the training call
+    # must stay behind this guard.
     rotation_model = ZebraFishRotationModel()
-    
-    # Train the rotation model
-    data_yaml = "datasets/fish13.v4-bnhtsize.yolov11/data.yaml"
-    rotation_model.train_rotation_model(data_yaml, epochs=50)
+    data_yaml = "datasets/fish13_union_4class/data.yaml"
+    rotation_model.train_rotation_model(data_yaml, epochs=300)

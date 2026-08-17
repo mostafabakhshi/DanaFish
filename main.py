@@ -48,7 +48,9 @@ def process_images(custom_image_dir, base_output_dir=None):
         try:
             start_time = time.time()
 
-            # ── Step 1: orientation correction → corrected 840×840 image + body bbox ──
+            # ── Step 1: preprocessing + orientation correction ─────────────────────
+            # The background pedestal is removed inside correct_image_orientation,
+            # before either model runs (see preprocessing.py).
             corrected_image, info = rotation_corrector.correct_image_orientation(
                 image_path, save_annotated=False)
 
@@ -158,9 +160,10 @@ if __name__ == "__main__":
 
         logger.info("=" * 60)
         logger.info("DanaFish — ZEBRAFISH NEURON ANALYSIS PIPELINE")
-        logger.info("1. Orientation correction (ImageRotationCorrector → blue body ROI)")
-        logger.info("2. Neuron detection (YOLO26m v7, imgsz=1280, conf=0.30)")
-        logger.info("3. Region analysis (ExactBodyRegionAnalyzer → spinal cord line)")
+        logger.info("1. Preprocessing (background pedestal removal)")
+        logger.info("2. Orientation correction (ImageRotationCorrector → blue body ROI)")
+        logger.info("3. Neuron detection (YOLO26m v7, imgsz=1280, conf=0.35)")
+        logger.info("4. Region analysis (ExactBodyRegionAnalyzer → spinal cord line)")
         logger.info(f"Input : {custom_image_dir}")
         logger.info(f"Output: {result_dir}")
         logger.info("=" * 60)

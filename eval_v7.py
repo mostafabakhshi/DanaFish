@@ -18,9 +18,13 @@ MODEL_PATH = ROOT / "runs/detect/runs/detect/neuron_v7_yolo26m_1280/weights/best
 DATA_YAML  = ROOT / "datasets/fish13_v8_neuron_only/data.yaml"
 TEST_IMGS  = ROOT / "datasets/fish13_v8_neuron_only/test/images"
 TEST_LBLS  = ROOT / "datasets/fish13_v8_neuron_only/test/labels"
+# The confidence threshold is selected on the validation split. The test split is
+# used only for the single final evaluation, never for tuning.
+VALID_IMGS = ROOT / "datasets/fish13_v8_neuron_only/valid/images"
+VALID_LBLS = ROOT / "datasets/fish13_v8_neuron_only/valid/labels"
 PAPER      = Path(r"D:\Project2\DanaFishPaperFinal")
 
-CONF = 0.30
+CONF = 0.35
 IOU  = 0.5
 IMGSZ = 1280
 
@@ -128,20 +132,37 @@ plt.savefig(str(out_val), dpi=150, bbox_inches="tight")
 plt.close()
 print(f"\n  Saved {out_val}")
 
-# ── 4. Confidence sweep ───────────────────────────────────────────────────────
-print("\n  Running confidence threshold sweep...")
+# ── 4. Confidence sweep — ON THE VALIDATION SPLIT ─────────────────────────────
+# This is where CONF is chosen. It must not touch the test split, or the final
+# evaluation above would be reporting performance at a threshold tuned on itself.
+print("\n  Running confidence threshold sweep on the VALIDATION split...")
+val_files = sorted(glob.glob(str(VALID_IMGS / "*.jpg")) +
+                   glob.glob(str(VALID_IMGS / "*.png")))
+val_gt = np.array([sum(1 for ln in open(VALID_LBLS / f"{Path(p).stem}.txt") if ln.strip())
+                   if (VALID_LBLS / f"{Path(p).stem}.txt").exists() else 0
+                   for p in val_files], dtype=float)
+print(f"  validation set: {len(val_files)} images, {int(val_gt.sum())} annotated cell bodies")
+
 confs = np.arange(0.05, 0.71, 0.05)
 sweep_r, sweep_mae, sweep_bias = [], [], []
 for c in confs:
     pr = []
-    for p in img_files:
+    for p in val_files:
         res = model(p, conf=float(c), iou=IOU, imgsz=IMGSZ, verbose=False)
         pr.append(len(res[0].boxes) if res[0].boxes is not None else 0)
     pr = np.array(pr, dtype=float)
-    rr, _ = stats.pearsonr(gt, pr)
+    rr, _ = stats.pearsonr(val_gt, pr)
     sweep_r.append(rr)
-    sweep_mae.append(np.mean(np.abs(pr - gt)))
-    sweep_bias.append(np.mean(pr - gt))
+    sweep_mae.append(np.mean(np.abs(pr - val_gt)))
+    sweep_bias.append(np.mean(pr - val_gt))
+
+# Selection rule: MAE is flat over a broad region, so it does not discriminate;
+# among thresholds within 0.05 of the minimum MAE, take the one with |bias| lowest.
+_mn = min(sweep_mae)
+_flat = [i for i, m in enumerate(sweep_mae) if m <= _mn + 0.05]
+_pick = min(_flat, key=lambda i: abs(sweep_bias[i]))
+print(f"  MAE flat over conf {confs[_flat[0]]:.2f}-{confs[_flat[-1]]:.2f}; "
+      f"|bias| lowest at {confs[_pick]:.2f}  ->  CONF = {CONF}")
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 for ax, vals, title, ylabel in zip(

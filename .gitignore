@@ -65,6 +65,7 @@ BIOLOGICAL_*.png
 # Editors / tooling
 .vscode/
 .qodo/
+.claude/
 
 # OS
 .DS_Store
