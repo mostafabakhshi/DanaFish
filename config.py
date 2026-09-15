@@ -7,14 +7,19 @@ COCO_EXTRACT_PATH = "datasets/zebra_coco"
 YOLO_OUTPUT_DIR = "datasets/zebra_yolo"
 OUTPUT_ANNOTATED_PATH = "datasets/zebra_yolo/test/My_Prediction"
 OUTPUT_EXCEL_PATH = "results/results_{}.xlsx"
-NEURON_MODEL_PATH  = "runs/detect/runs/detect/neuron_v7_yolo26m_1280/weights/best.pt"  # YOLO26m neuron-only v7
+# ── Neuron detector (1 class) ────────────────────────────────────────────────
+# YOLO26m, trained at imgsz 1280 on the 99 development specimens (81 for
+# training, 18 for checkpoint selection). Distributed as the release asset
+# neuron_detector.pt.
+NEURON_MODEL_PATH  = "weights/neuron_detector.pt"
 TRAINED_MODEL_PATH = NEURON_MODEL_PATH
 
-# ── Landmark detector (4-class: b, h, n, t) ──────────────────────────────────
-# YOLO26m, trained at imgsz 1280 on datasets/fish13_union_4class — the pooled
-# fish13.v4 and fish13.v8 annotation sets (700/99/65 images). Used for
-# orientation standardization and to seed the spinal-cord region.
-LANDMARK_MODEL_PATH = "runs/detect/runs/detect/landmark_v8_yolo26m_union/weights/best.pt"
+# ── Landmark detector (4 classes: b = body, h = head, n = neuron, t = yolk) ──
+# YOLO26m, trained at imgsz 1280 on datasets/fish13_union_4class, which pools
+# two annotation sets (684 training / 98 validation / 60 test images). Used for
+# orientation standardization and to seed the spinal-cord region. Distributed
+# as the release asset landmark_detector.pt.
+LANDMARK_MODEL_PATH = "weights/landmark_detector.pt"
 
 # Preprocessing configuration (pipeline Step 1, before any inference)
 PREPROCESS_CONFIG = {
@@ -28,16 +33,16 @@ PREPROCESS_CONFIG = {
 
 # Landmark detector configuration
 LANDMARK_CONFIG = {
-    "confidence": 0.1,        # Head/tail/neuron classes.
+    "confidence": 0.1,        # Head, yolk ("t") and neuron classes.
     "body_confidence": 0.01,  # The body class scores lower on coiled and dim larvae,
-                              # so it carries its own, lower threshold. Head and tail
+                              # so it carries its own, lower threshold. Head and yolk
                               # keep 0.1, so orientation is unaffected.
     "overlap": 0.5,           # NMS IoU.
     "imgsz": 960,             # Default single-scale inference size.
     # The body/spine class is scale-sensitive on elongated and coiled larvae, so
     # the body is searched over several inference sizes in this order, taking the
     # first detection at or above body_search_accept and otherwise the most
-    # confident one found. Head and tail are read from the same pass, so the
+    # confident one found. Head and yolk are read from the same pass, so the
     # accepted scale determines all landmarks for that image.
     "body_search_scales": (960, 416, 320),
     "body_search_accept": 0.1,
@@ -45,8 +50,9 @@ LANDMARK_CONFIG = {
 
 # Model configuration
 MODEL_CONFIG = {
-    "confidence": 0.35,          # Selected on the validation split: within the flat-MAE region
-                                 # (0.30-0.38) it is the threshold with bias closest to zero.
+    "confidence": 0.35,          # Selected by specimen-level 5-fold cross-validation on the
+                                 # 99 development specimens (lowest mean absolute error, bias
+                                 # closest to zero), before the test set was evaluated.
     "overlap": 0.5,             # Adjusted for better balance
     "threshold": 30,
     "padding": 20,

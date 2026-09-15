@@ -5,7 +5,7 @@ Same models and same analysis as the fully automatic `main.py`, but the operator
 correct the model at every stage:
 
   1. The image is loaded and orientation-corrected automatically (as in main.py).
-  2. Head / body / tail landmarks can be erased and re-placed by hand when the
+  2. Head / body / yolk landmarks can be erased and re-placed by hand when the
      detector gets them wrong or misses them entirely; orientation can then be
      re-applied from the corrected landmarks.
   3. The ROI (spinal-cord region) is drawn manually by the operator instead of
@@ -63,6 +63,9 @@ COL_SELECTED = QColor(255, 60, 60)
 COL_CORD = QColor(255, 60, 60)
 
 LANDMARK_COLORS = {'head': COL_HEAD, 'body': COL_BODY, 'tail': COL_TAIL}
+# Display names for the on-image labels. The dict keys stay as the detector's
+# class names ('tail'); only what the operator sees is renamed.
+LANDMARK_DISPLAY = {'head': 'head', 'body': 'body', 'tail': 'yolk'}
 
 HANDLE_PX = 8       # size of resize handles, in screen pixels
 MIN_BOX_PX = 3      # smallest box the user can draw, in image pixels
@@ -80,7 +83,7 @@ class Mode(Enum):
 # Edit targets, labelled with their keyboard shortcut so the panel is self-documenting.
 TARGET_LABELS = {
     'head':    'Head  (H)',
-    'tail':    'Tail  (T)',
+    'tail':    'Yolk  (Y)',
     'roi':     'Region of interest  (R)',
     'cord':    'Spinal cord  (S)',
     'neurons': 'Neurons  (N)',
@@ -390,7 +393,7 @@ class ImageCanvas(QWidget):
             p.setPen(pen)
             p.drawRect(r)
             p.setFont(QFont('Segoe UI', 9, QFont.Bold))
-            p.drawText(r.topLeft() + QPointF(3, -4), name)
+            p.drawText(r.topLeft() + QPointF(3, -4), LANDMARK_DISPLAY.get(name, name))
 
         # ROI
         if st.roi is not None:
@@ -1205,7 +1208,7 @@ class MainWindow(QMainWindow):
         self.target_buttons = {}
         for key, tip in [
             ('head', 'Drag to place the head; Delete erases it'),
-            ('tail', 'Drag to place the tail; Delete erases it'),
+            ('tail', 'Drag to place the yolk; Delete erases it'),
             ('roi', 'Drag to draw the region; drag a corner to adjust'),
             ('cord', 'Drag a point to bend the curve · click to insert · right-click to delete'),
             ('neurons', 'Drag empty space to add · right-click to delete · '
@@ -1351,7 +1354,7 @@ class MainWindow(QMainWindow):
         hints = {
             Mode.VIEW: 'View — drag to pan, wheel to zoom.',
             Mode.LANDMARK: 'Landmark — drag to place the selected landmark; Delete erases it. '
-                           'Then "Re-apply orientation" if head/tail moved.',
+                           'Then "Re-apply orientation" if head/yolk moved.',
             Mode.ROI: 'ROI — drag to draw the spinal-cord region; drag a corner to adjust; Delete clears.',
             Mode.CORD: 'Spinal cord — drag a white point to bend the curve · click empty space to '
                        'insert a point · right-click (or Delete) to remove one. '
@@ -1373,10 +1376,11 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, e):
         # S is the advertised key for the spinal cord; C stays as an alias.
         mapping = {Qt.Key_V: Mode.VIEW, Qt.Key_E: self._last_edit_mode,
-                   Qt.Key_H: Mode.LANDMARK, Qt.Key_T: Mode.LANDMARK, Qt.Key_R: Mode.ROI,
+                   Qt.Key_H: Mode.LANDMARK, Qt.Key_T: Mode.LANDMARK,
+                   Qt.Key_Y: Mode.LANDMARK, Qt.Key_R: Mode.ROI,
                    Qt.Key_S: Mode.CORD, Qt.Key_C: Mode.CORD,
                    Qt.Key_N: Mode.NEURON, Qt.Key_M: Mode.MEASURE}
-        if e.key() in (Qt.Key_H, Qt.Key_T) and not e.modifiers():
+        if e.key() in (Qt.Key_H, Qt.Key_T, Qt.Key_Y) and not e.modifiers():
             self._set_edit_target('head' if e.key() == Qt.Key_H else 'tail')
             return
         if e.key() in mapping and not e.modifiers():
@@ -1614,7 +1618,7 @@ class MainWindow(QMainWindow):
         if not all(st.landmarks[k] for k in ('head', 'body', 'tail')):
             QMessageBox.information(
                 self, 'DanaFish',
-                'Head, body and tail are all needed to compute the orientation.\n\n'
+                'Head, body and yolk are all needed to compute the orientation.\n\n'
                 'Switch to landmark mode (L) and place the missing ones first.')
             return
         rotator, _, _ = self._models()
@@ -1912,7 +1916,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, 'DanaFish — semi-automatic', """
 <b>Workflow</b><br>
 1. <b>Open Image</b> or <b>Open Folder</b> — orientation correction runs automatically.<br>
-2. <b>L</b> — fix head / body / tail if the model got them wrong; drag to place, Delete to erase.
+2. <b>L</b> — fix head / body / yolk if the model got them wrong; drag to place, Delete to erase.
    Then <b>Ctrl+R</b> to re-apply orientation from your corrected landmarks.<br>
 3. <b>R</b> — drag to draw the ROI over the spinal-cord region (a corner handle adjusts it).<br>
 4. <b>Ctrl+D</b> — detect neurons inside the ROI and fit the spinal cord.<br>
@@ -1947,7 +1951,7 @@ image is rescaled onto the 840×840 canvas by a different factor.<br><br>
 
 <b>Keys</b><br>
 <b>V</b> view · <b>E</b> edit<br>
-<b>H</b> head · <b>T</b> tail · <b>R</b> region of interest · <b>S</b> spinal cord · <b>N</b> neurons<br>
+<b>H</b> head · <b>Y</b> yolk · <b>R</b> region of interest · <b>S</b> spinal cord · <b>N</b> neurons<br>
 <b>M</b> measure · <b>Ctrl+K</b> scale · <b>Ctrl+D</b> detect · <b>Ctrl+Shift+R</b> refit cord ·
 <b>Ctrl+Z</b> undo · <b>Ctrl+0</b> fit view · <b>PgUp/PgDn</b> previous/next image ·
 <b>Ctrl+S</b> export · <b>F1</b> this help<br>
@@ -1955,7 +1959,7 @@ image is rescaled onto the 840×840 canvas by a different factor.<br><br>
 
 <b>Colours</b> — <span style="color:#1E90FF">body</span>,
 <span style="color:#FF8C00">head</span>,
-<span style="color:#DC3CC8">tail</span>,
+<span style="color:#DC3CC8">yolk</span>,
 <span style="color:#00C8FF">ROI</span>,
 <span style="color:#00E600">model neuron</span>,
 <span style="color:#FFD700">hand-placed neuron</span>,

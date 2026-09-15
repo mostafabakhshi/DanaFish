@@ -21,6 +21,11 @@ Automated pipeline for counting neuronal cell bodies in zebrafish spinal-cord im
 - Python 3.10+
 - CUDA-compatible GPU (recommended; CPU works but is slow)
 - Conda (Anaconda or Miniconda)
+- **`ultralytics==8.4.90` exactly — not `>=`.** The released YOLO26 weights (both the neuron and
+  landmark detectors) were trained under 8.4.90. Loading them with an older 8.3.x install does not
+  error or warn — it silently reconstructs a subtly different network graph and returns degraded
+  detections (fewer neurons found per image, sometimes by half or more). `requirements.txt` pins
+  this version; do not relax it to a range.
 
 ---
 
@@ -77,7 +82,7 @@ python main.py
 `main.py` is interactive and prompts for two paths:
 
 ```
-Enter the path to your folder containing images:              <- e.g. PLXNA1-Jesh-JPG-Final
+Enter the path to your folder containing images:              <- e.g. PLXNA1-Jesh-JPG-New
 Enter the path for results folder (press Enter for default):  <- Enter = datasets/zebra_yolo/test/My_Prediction/results
 ```
 
@@ -89,13 +94,13 @@ subfolder in one run. The output tree mirrors the input tree.
 Pipe the two answers in:
 
 ```powershell
-"PLXNA1-Jesh-JPG-Final`nresults_plxna1" | python main.py
+"PLXNA1-Jesh-JPG-New`nresults_plxna1" | python main.py
 ```
 
 Or call the entry point directly, which is cleaner for scripted/batch runs:
 
 ```powershell
-python -c "from main import process_images; process_images('PLXNA1-Jesh-JPG-Final', 'results_plxna1')"
+python -c "from main import process_images; process_images('PLXNA1-Jesh-JPG-New', 'results_plxna1')"
 ```
 
 ---
@@ -127,7 +132,7 @@ and lands on **Neurons** after each image loads:
 
 | Edit target | What you do |
 |---|---|
-| **Head** `H` / **Tail** `T` | Drag to place the landmark when the detector was wrong or found nothing; `Delete` erases it. Then `Ctrl+R` re-applies the orientation from your corrected landmarks. |
+| **Head** `H` / **Yolk** `Y` | Drag to place the landmark when the detector was wrong or found nothing; `Delete` erases it. Then `Ctrl+R` re-applies the orientation from your corrected landmarks. |
 | **Region of interest** `R` | Drag to redraw the region. Drag a corner handle to adjust, `Delete` to clear. `Ctrl+D` re-detects inside it. |
 | **Spinal cord** `S` | Drag a control point to **bend** the curve · click empty space to **insert** one · right-click or `Delete` to **remove** one · `Ctrl+Shift+R` refits automatically. |
 | **Neurons** `N` | Drag empty space to **add** · right-click to **delete** · drag a box to **move** · drag a corner to **resize**. The list has a tick box per neuron with **Remove ticked**, plus **Clear all neurons** to start counting by hand. |
@@ -167,7 +172,7 @@ The choice affects the display only. If a calibration exists, exported results a
 columns regardless of which unit is on screen — switching the view to pixels never strips
 measurements from your saved data.
 
-Keys: `V` view · `E` edit · `H` head · `T` tail · `R` region · `S` cord · `N` neurons ·
+Keys: `V` view · `E` edit · `H` head · `Y` yolk · `R` region · `S` cord · `N` neurons ·
 `M` measure · `Ctrl+K` set scale · `Ctrl+Z` undo · `Ctrl+0` fit view ·
 `PgUp`/`PgDn` previous/next image · `F1` help. Mouse wheel zooms; middle-drag pans.
 
@@ -229,11 +234,11 @@ Each image passes through five stages (`main.py::process_images`):
 1. **Preprocessing** — `preprocessing.py` removes the background pedestal (see below). Applied
    inside `correct_image_orientation`, before either model runs, so both see the same pixels.
 2. **Orientation correction** — `ImageRotationCorrector` (`image_rotation_corrector.py`) detects
-   anatomical landmarks with the active landmark detector (4-class: body, head, neuron, tail),
-   reorients the larva to a standard pose, and returns an 840x840 canvas plus the body bounding
-   box. Images with no detected body region are skipped with a warning.
-3. **Neuron detection** — `ZebraFishModel` (`model.py`) runs `neuron_v7_yolo26m_1280` on the
-   corrected image at `imgsz=1280`, `conf=0.35`, `iou=0.50`.
+   anatomical landmarks with the landmark detector (`weights/landmark_detector.pt`; classes body,
+   head, neuron and yolk), reorients the larva to a standard pose, and returns an 840x840 canvas plus
+   the body bounding box. Images with no detected body region are skipped with a warning.
+3. **Neuron detection** — `ZebraFishModel` (`model.py`) runs the neuron detector
+   (`weights/neuron_detector.pt`) on the corrected image at `imgsz=1280`, `conf=0.35`, `iou=0.50`.
 4. **Region analysis** — `ExactBodyRegionAnalyzer` (`test_exact_body_region_pipeline.py`) restricts
    detections to the spinal-cord region, fits the spinal-cord curve, and groups neurons into
    segments via DBSCAN on the x-coordinate.
@@ -241,33 +246,25 @@ Each image passes through five stages (`main.py::process_images`):
 
 ### Step 1 — background pedestal removal
 
-Some acquisition sessions carry a constant additive offset across the frame, so that true black
-sits at intensity 25–35 instead of near zero. The offset compresses the range available to the
-signal and depresses detection confidence; in the worst cases genuine cell bodies fall below the
-detection threshold and the image is counted as zero neurons.
+Some acquisition sessions carry a constant additive offset across the frame, so that true black sits
+well above zero. The offset compresses the range available to the signal and depresses detection
+confidence; in the worst cases genuine cell bodies fall below the detection threshold and the image
+is counted as zero neurons.
 
 The step measures the offset from the image itself — the 1st percentile of non-zero green-channel
-pixels — and subtracts it. Nothing is hard-coded, so the correction scales to each acquisition, and
-because the value comes from the image's own histogram it is blind to experimental group.
+pixels — and subtracts it from all three channels. Nothing is fixed in advance, so the correction
+scales to each acquisition, and because the value comes from the image's own intensity distribution
+it is blind to experimental group.
 
-It is **gated**: images whose pedestal is below `min_pedestal` (15) are passed through untouched.
-Applied unconditionally the step also acts on images that do not have the problem, where it
-over-detects — on the held-out test set an ungated correction raised bias from +0.17 to +0.92
-counts per image. Gated, 51 of those 52 images are left unchanged (MAE 1.52 → 1.60,
-bias +0.17 → +0.25).
+It is **gated**: images whose offset is below `min_pedestal` (15 intensity levels) pass through
+unchanged, so acquisitions without an appreciable offset are unaffected. In the plxna1a cohort it was
+triggered in 37 of the 48 larvae.
 
 ```python
 PREPROCESS_CONFIG = {"enabled": True, "percentile": 1.0, "channel": 1, "min_pedestal": 15.0}
 ```
 
-Setting `enabled: False` restores the previous behaviour exactly — verified to reproduce
-pre-existing counts on all 42 images of the biological dataset.
-
-> **A caveat worth stating.** The annotated splits contain almost no pedestal-affected images
-> (median pedestal 10, versus 26 in the affected acquisition), so they cannot measure the benefit,
-> and what they do measure is within noise — the validation split marginally prefers the correction
-> (r 0.816 → 0.855 ungated) while the test split marginally prefers it off (r 0.862 → 0.844). The
-> justification for the step is the failure mode it removes, not a gain in benchmark accuracy.
+Setting `"enabled": False` runs the pipeline without this step.
 
 ---
 
@@ -277,7 +274,7 @@ Any nested folder layout works; `main.py` walks the tree recursively and accepts
 and `.png`. The two datasets currently in the repo:
 
 ```
-PLXNA1-Jesh-JPG-Final/          (60 images)
+PLXNA1-Jesh-JPG-New/            (48 images)
 ├── 190823/
 │   ├── Ctrl/
 │   └── plxna1 sb/
@@ -323,64 +320,70 @@ where no neurons fall in the spinal-cord region get an annotated image but no sp
 
 ## Model Weights
 
-Both detectors are YOLO26m, tracked in `runs/` and loaded by relative path:
+Both detectors are YOLO26m (20.4 M parameters), trained with Ultralytics 8.4.90. `config.py` loads
+them from `weights/`, relative to the project root:
 
-| Model | Path | Purpose |
+| Detector | File | Classes |
 |---|---|---|
-| `neuron_v7_yolo26m_1280` | `runs/detect/runs/detect/neuron_v7_yolo26m_1280/weights/best.pt` | Neuron detection (1-class) |
-| `landmark_v8_yolo26m_union` | `runs/detect/runs/detect/landmark_v8_yolo26m_union/weights/best.pt` | Landmark detection (4-class: b, h, n, t) |
+| Neuron | `weights/neuron_detector.pt` | `neuron` |
+| Landmark | `weights/landmark_detector.pt` | `b` body, `h` head, `n` neuron, `t` yolk |
 
-Both were trained from `yolo26m.pt` at `imgsz=1280`, batch 2, AdamW, seed 42, capped at 300 epochs
-with patience 50. The paths are doubly nested (`runs/detect/runs/detect/`) — intentional, and matches
-`config.py`.
+The weights are not tracked in git. Download both files from the
+[v1.1.0 release](https://github.com/mostafabakhshi/DanaFish/releases/tag/v1.1.0) and place them in `weights/`.
 
-| | neuron detector | landmark detector |
+| | Neuron detector | Landmark detector |
 |---|---|---|
-| dataset | `fish13_v8_neuron_only` | `fish13_union_4class` |
-| split | 424 / 62 / 52 | 700 / 99 / 65 |
-| instances | 10,011 | 18,685 |
-| ran to / best epoch | 149 / 111 | 263 / 225 |
-| test mAP@50 | 0.906 | 0.943 |
-| test mAP@50-95 | 0.394 | 0.824 |
+| Training data | 346 training and 75 checkpoint-selection images of 99 development specimens | 684 training / 98 validation / 60 test images |
+| Initialisation | `yolo26m.pt` (COCO-pretrained) | `yolo26m.pt` (COCO-pretrained) |
+| Input size, batch | 1280, 2 | 1280, 2 |
+| Optimizer, initial learning rate | AdamW, 3 × 10⁻⁴ | AdamW, 1 × 10⁻³ |
+| Epochs: cap / run / best | 150 / 96 / 46 | 300 / 275 / 225 |
+| Test set | sealed, 26 specimens | held-out split, 60 images |
+| Test mAP@50 | 0.868 | 0.948 |
 
-### The landmark dataset is pooled across acquisitions
+On its sealed test set the neuron detector reaches precision 0.834, recall 0.835 and
+F1 0.835. The landmark detector's test mAP@50 per class is head 0.994, yolk 0.995, body
+0.977 and neuron 0.827.
 
-`fish13_union_4class/data.yaml` lists two annotation sets rather than copying them:
-`fish13.v4-bnhtsize.yolov11` (276/37/13) and `fish13.v8-danafish28072026.yolo26` (424/62/52). They
-share no images and both declare `nc: 4` with `names: ['b','h','n','t']` in the same order, so the
-labels pool directly.
+`ZebraFishModel().train(data_yaml)` and `ZebraFishRotationModel().train_rotation_model(data_yaml)`
+retrain from `yolo26m.pt` with the hyperparameters of the released models.
 
-Pooling is not incidental — it is required. A landmark detector trained on either session alone
-generalizes poorly to the other, and in particular the **body/spine class** fails to transfer, which
-matters because that box seeds the spinal-cord region. Trained on the pooled set, the detector
-reaches mAP@50 0.943 overall (body 0.969, head 0.990, tail 0.995) on its own held-out test set and
-locates a body in all 42 larvae of the biological dataset.
+### The landmark dataset is pooled
 
-Neither annotation set contains any plxna1a image, so the biological dataset is fully held out from
-training.
+`datasets/fish13_union_4class/data.yaml` lists two annotation sets rather than copying them. They share
+no images and both declare `nc: 4` with `names: ['b','h','n','t']` in the same order, so the labels
+pool directly.
+
+Pooling is required, not incidental: a landmark detector trained on either set alone generalizes
+poorly to the other, and the **body/spine class** in particular fails to transfer — which matters,
+because that box seeds the spinal-cord region. Neither annotation set contains any plxna1a image, so
+the biological dataset is held out from training.
 
 ### Multi-scale body search
 
-The body/spine class is sensitive to the larva's apparent scale, which varies with frame size and
-body curvature. The detector therefore searches for the body over the inference sizes in
+The body/spine class is sensitive to the larva's apparent scale, which varies with frame size and body
+curvature. The detector therefore searches for the body over the inference sizes in
 `LANDMARK_CONFIG["body_search_scales"]` — `(960, 416, 320)` — taking the first detection at or above
-`body_search_accept` (0.1) and otherwise the most confident found. Head and tail are read from the
+`body_search_accept` (0.1) and otherwise the most confident found. Head and yolk are read from the
 same pass as the accepted body, so all landmarks stay mutually consistent.
 
-Single-scale inference locates a body in 40 of the 42 biological larvae; the three-scale search
-locates one in all 42.
+In the plxna1a cohort a body region is found in 47 of the 48 larvae; the
+remaining larva, a morphant, is skipped.
 
 ---
 
 ## Evaluation
 
-`eval_v7.py` evaluates the neuron detector against manual annotations on the held-out test set and
-produces agreement statistics (Pearson r, MAE, Bland–Altman bias and limits of agreement) plus a
-confidence sweep.
+`evaluate.py` evaluates the neuron detector named in `config.py` on one split of a YOLO-format
+dataset:
 
 ```powershell
-python eval_v7.py
+python evaluate.py --data path/to/data.yaml --split test --out result.json
 ```
 
-Inference is whole-image at `imgsz=1280`, the same configuration the production pipeline uses and
-the one reported in the manuscript.
+It reports detection metrics from the Ultralytics validation routine (mAP@50, mAP@50-95, precision,
+recall, F1) and count agreement at the pipeline's inference settings (confidence 0.35, NMS IoU 0.5,
+`imgsz=1280`): mean absolute error, mean bias, 95% limits of agreement, Pearson correlation and Lin's
+concordance correlation coefficient. Each image is counted once, as the number of detections for the
+whole image, against the number of annotated boxes in its label file — the procedure behind the
+test-set evaluation reported in the manuscript.

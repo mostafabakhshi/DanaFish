@@ -1,7 +1,8 @@
 numpy>=1.24.0
 opencv-python>=4.8.0
 pandas>=2.0.0
-ultralytics>=8.0.0
+ultralytics==8.4.90  # pinned: the released YOLO26 weights were trained with 8.4.90 and load
+                     # into a subtly different (degraded) network graph under 8.3.x
 scipy>=1.10.0
 supervision>=0.3.0
 scikit-learn>=1.0.0
