@@ -17,7 +17,7 @@ class ImageRotationCorrector:
     Step 2: Image Orientation Correction System
     Uses landmarks from Step 1 to automatically flip zebrafish images 
     to standard orientation using horizontal and vertical flips only.
-    Target: head (h) on left of body (b), tail (t) below body (b)
+    Target: head (h) on left of body (b), yolk (t) below body (b)
     """
     
     def __init__(self, rotation_model_path=None, target_size=(840, 840)):
@@ -447,7 +447,7 @@ class ImageRotationCorrector:
                 cv2.circle(annotated, tuple(center), 3, colors.get(class_name, (255, 255, 255)), -1)
                 
                 # Draw label with short name for display
-                short_name = {'head': 'H', 'tail': 'T', 'body': 'B'}.get(class_name, class_name.upper())
+                short_name = {'head': 'H', 'tail': 'Y', 'body': 'B'}.get(class_name, class_name.upper())
                 label = f"{short_name}: {confidence:.2f}"
                 label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
                 cv2.rectangle(annotated, (bbox[0], bbox[1] - label_size[1] - 5), 

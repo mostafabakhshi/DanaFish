@@ -40,64 +40,50 @@ class ZebraFishModel:
 
         return labels, np.array(boxes) if boxes else np.array([]).reshape(0, 4), confidences
 
-    def train(self, data_yaml_path):
-        """Train the model with the given data configuration."""
-        logger.info("Starting model training...")
-        self.model.train(
+    def train(self, data_yaml_path, base="yolo26m.pt", run_name="neuron_retrain"):
+        """Train a neuron detector with the settings of the released model.
+
+        Starts from the COCO-pretrained YOLO26m checkpoint, not from the released
+        weights, and uses the hyperparameters the released neuron detector was
+        trained with. A new run directory is written under runs/detect; an existing
+        run of the same name is not overwritten.
+        """
+        logger.info(f"Starting neuron detector training from {base}...")
+        return YOLO(base).train(
             data=data_yaml_path,
-            epochs=50,
-            imgsz=640,
-            batch=8,
+            project=os.path.abspath(os.path.join("runs", "detect")),
+            name=run_name,
+            exist_ok=False,
+            pretrained=True,
+            imgsz=1280,
+            batch=2,
+            nbs=64,
             optimizer="AdamW",
-            lr0=0.0005,
-            lrf=0.005,
-            momentum=0.937,
-            weight_decay=0.001,
-            warmup_epochs=5.0,
-            warmup_momentum=0.8,
-            box=5.0,
-            cls=0.3,
-            dfl=1.0,
+            lr0=0.0003,
+            lrf=0.01,
+            weight_decay=0.0005,
+            epochs=150,
+            patience=50,
+            seed=42,
+            deterministic=True,
+            amp=True,
+            cos_lr=False,
+            close_mosaic=20,
+            degrees=10.0,
+            translate=0.1,
+            scale=0.4,
+            flipud=0.3,
+            fliplr=0.5,
+            mosaic=0.5,
+            mixup=0.0,
+            copy_paste=0.3,
+            erasing=0.2,
             hsv_h=0.015,
             hsv_s=0.7,
             hsv_v=0.4,
-            degrees=15.0,
-            translate=0.2,
-            scale=0.5,
-            shear=2.0,
-            perspective=0.0,
-            flipud=0.1,
-            fliplr=0.5,
-            mosaic=1.0,
-            mixup=0.3,
-            copy_paste=0.3,
-            auto_augment="randaugment",
-            erasing=0.4,
-            close_mosaic=15,
-            cos_lr=True,
-            patience=100,
-            save_period=5,
+            workers=4,
             device=0,
-            workers=8,
-            project="runs/detect",
-            name="train_enhanced_v2",
-            exist_ok=True,
-            pretrained=True,
-            amp=True,
-            multi_scale=True,
-            rect=False,
-            overlap_mask=True,
-            mask_ratio=4,
-            dropout=0.2,
-            fraction=1.0,
-            cache=True,
-            label_smoothing=0.1,
-            nbs=64,
-            single_cls=False,
-            verbose=True,
-            seed=42
         )
-        logger.info("Training completed")
 
     def validate(self, data_yaml_path):
         """Validate the model on the given dataset."""

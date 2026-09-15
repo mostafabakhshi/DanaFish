@@ -55,13 +55,14 @@ class ZebraFishRotationModel:
     
     def train_rotation_model(self, data_yaml_path, epochs=300, base="yolo26m.pt",
                              imgsz=1280, batch=2,
-                             run_name="landmark_v8_yolo26m_union"):
-        """Train the landmark detection model.
+                             run_name="landmark_retrain"):
+        """Train a landmark detector with the settings of the released model.
 
-        The defaults reproduce the shipped weights: YOLO26m at imgsz 1280 on the
-        pooled 4-class dataset (datasets/fish13_union_4class/data.yaml). The full
-        argument set of the shipped run is also preserved in that run's own
-        args.yaml.
+        The hyperparameters below are those the released landmark detector was
+        trained with: YOLO26m from the COCO-pretrained checkpoint, imgsz 1280, on
+        the pooled 4-class dataset (datasets/fish13_union_4class/data.yaml). A new
+        run directory is written; an existing run of the same name is not
+        overwritten.
         """
         logger.info(f"Starting landmark model training from {base} at imgsz {imgsz}...")
 
@@ -101,21 +102,21 @@ class ZebraFishRotationModel:
             close_mosaic=10,
             cos_lr=True,
             patience=50,
-            save_period=25,
             device=0,
             # Ultralytics resolves a relative project against its own runs_dir, which
             # would nest the run a second level deep; give it an absolute path.
             workers=4,
             project=os.path.abspath(os.path.join("runs", "detect", "runs", "detect")),
             name=run_name,
-            exist_ok=True,
+            exist_ok=False,
             pretrained=True,
             amp=True,
             fraction=1.0,
             cache=False,
             label_smoothing=0.0,  # No label smoothing for precise landmark detection
             verbose=True,
-            seed=42
+            seed=42,
+            deterministic=True,
         )
         
         # Update model path to the best trained model
