@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+title: "DanaFish: automated detection and counting of dorsal root ganglion neurons in zebrafish"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+authors:
+  - family-names: Bakhshi
+    given-names: Mostafa
+repository-code: "https://github.com/mostafabakhshi/DanaFish"
+abstract: >-
+  DanaFish is an image-analysis pipeline for counting dorsal root ganglion (DRG)
+  neuronal cell bodies in fluorescence images of zebrafish larvae. It corrects the
+  background pedestal, standardizes larval orientation with a YOLO26m landmark
+  detector, detects neurons with a YOLO26m detector, restricts counting to the
+  spinal-cord region, and exports counts with their somite-level positions. It runs
+  fully automatically over a folder of images, or in a semi-automatic mode in which
+  the automatic result is presented for expert correction.
+keywords:
+  - zebrafish
+  - dorsal root ganglion
+  - neuron counting
+  - object detection
+  - YOLO
+  - bioimage analysis
+license: MIT
+version: 1.1.0
+date-released: "2026-09-15"
