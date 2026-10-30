@@ -48,6 +48,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QVBoxLa
 from model import ZebraFishModel
 from image_rotation_corrector import ImageRotationCorrector
 from test_exact_body_region_pipeline import ExactBodyRegionAnalyzer
+from preprocessing import measure_pedestal, preprocess
 from config import OUTPUT_ANNOTATED_PATH
 
 IMAGE_EXTS = ('.jpg', '.jpeg', '.png')
@@ -123,6 +124,16 @@ def smooth_curve_through(points, n_out=CORD_SAMPLES):
     if len(xs) == 3:
         return x_new, np.poly1d(np.polyfit(xs, ys, 2))(x_new)
     return x_new, np.interp(x_new, xs, ys)
+
+
+def subtract_value(image, pedestal):
+    """Subtract a fixed pedestal from every channel, clipping at 0.
+
+    Same operation as preprocessing.subtract_pedestal, but with the value supplied, so
+    that a pedestal measured on the original image can be removed from the canvas.
+    """
+    lut = np.clip(np.arange(256, dtype=np.float32) - pedestal, 0, 255).astype(np.uint8)
+    return cv2.LUT(image, lut)
 
 
 def polyline_length(xs, ys):
@@ -905,16 +916,19 @@ class State:
         self.spinal_length = 0.0
         self.edits = {'added': [], 'removed': [], 'landmarks_edited': [],
                       'roi_manual': False, 'reoriented': False}
+        self.pedestal = 0.0            # 1st percentile of non-zero green pixels, original image
+        self.pedestal_by_gate = 0.0    # part of it already removed by the pipeline's gated Step 1
+        self.detect_pedestal = None    # {'ungated': bool, 'subtracted': float} of the last detection
 
     def snapshot(self):
         return copy.deepcopy((self.landmarks, self.roi, self.neurons, self.selected,
                               self.cord_xy, self.spinal_length, self.cord_points,
-                              self.cord_edited, self.cord_selected))
+                              self.cord_edited, self.cord_selected, self.detect_pedestal))
 
     def restore(self, snap):
         (self.landmarks, self.roi, self.neurons, self.selected,
          self.cord_xy, self.spinal_length, self.cord_points,
-         self.cord_edited, self.cord_selected) = copy.deepcopy(snap)
+         self.cord_edited, self.cord_selected, self.detect_pedestal) = copy.deepcopy(snap)
 
     def rebuild_cord(self):
         """Recompute the smoothed curve from the current control points."""
@@ -1244,6 +1258,15 @@ class MainWindow(QMainWindow):
         self.keep_user_cb.setChecked(True)
         self.keep_user_cb.setToolTip('Hand-placed neurons survive a re-run of the detector')
         g3.addWidget(self.keep_user_cb)
+        self.pedestal_cb = QCheckBox('Apply background pedestal subtraction')
+        self.pedestal_cb.setChecked(False)
+        self.pedestal_cb.setToolTip(
+            'Before neuron detection, subtract the 1st percentile of the non-zero green pixels '
+            '(measured on the original image) from all channels, clipped at 0, with no minimum.\n'
+            'Off: the standard pipeline, which removes the pedestal only when it is 15 or more.\n'
+            'Affects only the image the neuron detector sees; the original file is not changed.')
+        self.pedestal_cb.toggled.connect(self._pedestal_toggled)
+        g3.addWidget(self.pedestal_cb)
         btn = QPushButton('Detect in ROI  (Ctrl+D)')
         btn.clicked.connect(self.detect_in_roi)
         g3.addWidget(btn)
@@ -1571,6 +1594,11 @@ class MainWindow(QMainWindow):
         st.image_path = path
         st.corrected = corrected
         st.info = info or {}
+        original = cv2.imread(path)
+        if original is not None:
+            st.pedestal = measure_pedestal(original, percentile=1.0, channel=1)
+            # the canvas already carries the gated correction when it was applied
+            st.pedestal_by_gate = preprocess(original)[1] if info else 0.0
 
         lms = (info or {}).get('corrected_landmarks') or {}
         for name in ('head', 'body', 'tail'):
@@ -1676,9 +1704,17 @@ class MainWindow(QMainWindow):
         self.push_undo()
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         try:
+            detect_image = st.corrected
+            ungated = self.pedestal_cb.isChecked()
+            subtracted = st.pedestal_by_gate
+            if ungated and st.pedestal > 0 and not st.pedestal_by_gate:
+                detect_image = subtract_value(st.corrected, st.pedestal)
+                subtracted = st.pedestal
+            st.detect_pedestal = {'ungated': ungated, 'subtracted': float(subtracted)}
+
             tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
             tmp.close()
-            cv2.imwrite(tmp.name, st.corrected)
+            cv2.imwrite(tmp.name, detect_image)
             try:
                 old_conf = detector.confidence
                 detector.confidence = float(self.conf_spin.value())
@@ -1715,6 +1751,19 @@ class MainWindow(QMainWindow):
                         + (f' (+{n_user} placed by hand)' if n_user else ''))
         if not auto:
             self._set_edit_target('neurons')
+
+    def _pedestal_toggled(self, on):
+        st = self.state
+        if st.corrected is None:
+            return
+        state = (f'on: {st.pedestal:.1f} will be subtracted before detection' if on
+                 else 'off: standard pipeline')
+        self.statusBar().showMessage(f'Background pedestal subtraction {state}. '
+                                     f'Press Ctrl+D to re-detect.')
+
+    def _pedestal_record(self):
+        dp = self.state.detect_pedestal or {'ungated': False, 'subtracted': 0.0}
+        return dp['ungated'], round(self.state.pedestal, 2), round(dp['subtracted'], 2)
 
     def _fit_cord(self, force=False):
         """Fit the spinal cord and seed the draggable control points from it.
@@ -1819,6 +1868,9 @@ class MainWindow(QMainWindow):
                 'orientation_reapplied': st.edits['reoriented'],
                 'landmarks_edited': st.edits['landmarks_edited'],
                 'detection_confidence': float(self.conf_spin.value()),
+                'background_pedestal_subtraction_ungated': self._pedestal_record()[0],
+                'background_pedestal_measured': self._pedestal_record()[1],
+                'background_pedestal_subtracted_before_detection': self._pedestal_record()[2],
                 'neurons_total': len(st.neurons),
                 'neurons_from_model': sum(1 for n in st.neurons if n['source'] == 'model'),
                 'neurons_added_by_hand': sum(1 for n in st.neurons if n['source'] == 'user'),
@@ -1899,6 +1951,9 @@ class MainWindow(QMainWindow):
             'um_per_px': round(upp, 5) if upp else None,
             'ROI': str([int(v) for v in st.roi]),
             'Confidence': float(self.conf_spin.value()),
+            'Pedestal_subtraction_ungated': self._pedestal_record()[0],
+            'Pedestal_measured': self._pedestal_record()[1],
+            'Pedestal_subtracted': self._pedestal_record()[2],
             'Landmarks_edited': ', '.join(st.edits['landmarks_edited']) or '',
             'Reoriented': st.edits['reoriented'],
         }
@@ -1919,7 +1974,10 @@ class MainWindow(QMainWindow):
 2. <b>L</b> — fix head / body / yolk if the model got them wrong; drag to place, Delete to erase.
    Then <b>Ctrl+R</b> to re-apply orientation from your corrected landmarks.<br>
 3. <b>R</b> — drag to draw the ROI over the spinal-cord region (a corner handle adjusts it).<br>
-4. <b>Ctrl+D</b> — detect neurons inside the ROI and fit the spinal cord.<br>
+4. <b>Ctrl+D</b> — detect neurons inside the ROI and fit the spinal cord.
+Tick <b>Apply background pedestal subtraction</b> to remove the background offset (1st percentile of
+the non-zero green pixels, no minimum) from the image the detector sees; the original file is not
+changed.<br>
 5. <b>S</b> — correct the spinal cord. It is drawn as a smooth curve through a handful of white
 control points seeded from the automatic fit:<br>
 &nbsp;&nbsp;• drag a point → bend the curve there<br>

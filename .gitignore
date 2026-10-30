@@ -1,72 +1,38 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # This repository tracks SOURCE CODE ONLY.
 #
-# Research data, model weights, generated results, and the unpublished
-# manuscript are deliberately excluded. Anything committed here is permanently
-# recoverable from git history once the repository is made public, so keep
-# unpublished data out.
+# The working folder also holds the research data, model weights, generated
+# results, the manuscript and the presentation. None of that belongs on GitHub:
+# anything committed here is permanently recoverable from git history once the
+# repository is public.
+#
+# So the rule is inverted: everything is ignored, and only the files listed
+# below are tracked. A new data folder is therefore ignored automatically; a new
+# source file has to be added here deliberately.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Local µm-per-pixel calibration written by manual.py — specific to the
-# microscope and objective in use, so not shared. The scale actually used for a
-# result is recorded in that result's edits_*.json and summary_manual.xlsx.
-calibration.json
+/*
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+# Project files that are published
+!.gitignore
+!LICENSE
+!README.md
+!CITATION.cff
+!requirements.txt
 
-# Virtual environments
-.venv/
-venv/
-env/
+# Pipeline source
+!config.py
+!main.py
+!manual.py
+!model.py
+!rotation_model.py
+!image_rotation_corrector.py
+!preprocessing.py
+!test_exact_body_region_pipeline.py
+!evaluate.py
 
-# ── Model weights (50 MB; distribute via GitHub Releases, not git) ───────────
-*.pt
-*.pth
-runs/
-
-# ── Training datasets (datasets/fish13_v8_neuron_only alone is 4.8 GB) ──────
-datasets/
-
-# ── Raw research images (unpublished) ───────────────────────────────────────
-Thabiso_MP_Fish-Images/
-PLXNA1-Jesh-JPG-Final/
-test-images-model/
-
-# ── Generated pipeline output ───────────────────────────────────────────────
-*-result/
-results/
-out/
-output*/
-trained_model_output/
-test_results/
-test_analysis_output/
-verification_results/
-annotation_demo_results/
-biological_analysis_*/
-
-# ── Manuscript (unpublished) ────────────────────────────────────────────────
-MANUSCRIPT_DRAFT.md
-manuscript_figures/
-
-# Generated spreadsheets / slides / archives
-*.xlsx
-*.pptx
-*.zip
-BIOLOGICAL_*.png
-
-# Jupyter checkpoints
-.ipynb_checkpoints/
-
-# Editors / tooling
-.vscode/
-.qodo/
-.claude/
-
-# OS
-.DS_Store
-Thumbs.db
+# weights/: the note that says where to download the detectors. The .pt files
+# themselves are release assets, never committed.
+!weights/
+weights/*
+!weights/README.md
